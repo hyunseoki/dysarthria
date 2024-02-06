@@ -9,10 +9,10 @@ import tqdm
 import transformers
 from transformers import Wav2Vec2CTCTokenizer
 from lib.util import plot_F1score, seed_everything
+from lib.metric import ctc_metric
 from lib.dataset import DysarthriaDataset
 from lib.engine import BaseTrainer, AverageMeter
 from model import Wav2Vec2ForClassification
-
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -20,13 +20,13 @@ warnings.filterwarnings("ignore")
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
-    parser.add_argument('--kfold_idx', type=int, default=0, choices=[0, 1, 2, 3, 4])
-    parser.add_argument('--base_path', type=str, default='/workspace/01_dataset/aihub/구음장애/dysarthria/')
+    parser.add_argument('--kfold_idx', type=int, default=0, choices=[0, 1, 2, 3, 4])    
+    parser.add_argument('--base_path', type=str, default='/home/hyunseoki_rtx3090/ssd1/02_src/speech_recognition/dysarthria_clf')
     parser.add_argument('--save_path', type=str, default='./checkpoint')
 
-    parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=2e-5)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--lr', type=float, default=1e-5)
 
     parser.add_argument('--num_workers', type=int, default=2)
     parser.add_argument('--resume', type=str, default=None)
@@ -50,7 +50,7 @@ def prepare_model(cfg, tokenizer):
     model_cfg, *_ = transformers.PretrainedConfig.get_config_dict("facebook/wav2vec2-xls-r-300m")
     model_cfg["gradient_checkpointing"] = True
     model_cfg["ctc_loss_reduction"] = 'mean'
-    # model_cfg["ctc_zero_infinity"] = True
+    model_cfg["pad_token_id"] = tokenizer.pad_token_id
     model_cfg["task_specific_params"] = {"num_classes": 4,}
     model_cfg["vocab_size"] = len(tokenizer)
     model = Wav2Vec2ForClassification.from_pretrained(
@@ -95,7 +95,7 @@ def main():
     cfg = parse_args()
     seed_everything()
 
-    df = pd.read_csv(os.path.join(cfg.base_path, 'data',f'fold{cfg.kfold_idx}.csv'))
+    df = pd.read_csv(os.path.join(cfg.base_path, 'data', f'fold{cfg.kfold_idx}.csv'))
     tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("./tokenizer")
     # tokenizer = get_tokenizer()
     # tokenizer.save_pretrained("./tokenizer/")
@@ -119,37 +119,33 @@ def main():
     model.train()
     model.to(cfg.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, betas=(0.9, 0.98), eps=1e-08)
+    metric_func = ctc_metric
 
     torch.cuda.empty_cache()
     for epoch in range(cfg.epochs):
-        train_loop = tqdm.tqdm(enumerate(train_data_loader), total=len(train_data_loader), desc=f"Epoch [{epoch}]"),
+        print('Epoch {}/{}'.format(epoch+1, cfg.epochs))
+        train_loop = tqdm.tqdm(train_data_loader, total=len(train_data_loader), desc="Train:")
 
-        for step, sample in train_loop:
+        for sample in train_loop:
+            optimizer.zero_grad()
+
             sample = {k: v.to(model.device) for k, v in sample.items()}
-            ctc_loss, ctc_logits = model(**sample)
-
-            losses = {"ctc_loss": ctc_loss.item()}
-            train_loop.set_postfix(losses)
+            ctc_loss, ctc_logit = model(**sample)
             
+            wer, cer = metric_func(
+                true=sample['ctc_labels'].detach().cpu().numpy(), 
+                pred=ctc_logit.detach().cpu().numpy(), 
+                tokenizer=tokenizer,
+            )
+            log = {"ctc_loss": ctc_loss.item(), 
+                   "wer": wer, 
+                   "cer": cer,
+                   }
+
             ctc_loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
-            
-    # for epoch in range(cfg.epochs):
-    #     train_loop = tqdm.tqdm(enumerate(train_data_loader))
 
-    #     for step, sample in train_loop:
-    #         sample = {k: v.to(model.device) for k, v in sample.items()}
-    #         ctc_loss, ctc_logits = model(**sample)
-
-    #         losses = {"ctc_loss": ctc_loss.item()}
-    #         train_loop.set_description(
-    #             " | ".join([f"Epoch [{epoch}] "] + [f"{k} {v:.4f}" for k, v in losses.items()])
-    #         )
-
-    #         ctc_loss.backward()
-    #         optimizer.step()
-    #         optimizer.zero_grad()
+            train_loop.set_postfix({k: f"{v:.3f}" for k, v in log.items()})
 
 if __name__ == '__main__':
     main()
