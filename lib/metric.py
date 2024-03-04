@@ -11,7 +11,7 @@ def cls_metric(real, pred):
 
 def ctc_metric(true, pred, tokenizer):
     pred = pred.argmax(axis=-1)
-    true[true==-100] = 64
+    true[true==-100] = tokenizer.pad_token_id
 
     pred_str = tokenizer.batch_decode(pred)
     true_str = tokenizer.batch_decode(true)
@@ -19,4 +19,4 @@ def ctc_metric(true, pred, tokenizer):
     wer = wer_metric.compute(predictions=pred_str, references=true_str)
     cer = cer_metric.compute(predictions=pred_str, references=true_str)
     
-    return wer, wer
+    return wer, cer

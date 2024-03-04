@@ -26,12 +26,12 @@ class DysarthriaDataset(torch.utils.data.Dataset):
         audio, sr = librosa.load(wav_fn, sr=16_000)
         audio_len = len(audio)
 
-        cls_label = self.label2int[wav_fn.split('/')[-2]]
+        clf_label = self.label2int[wav_fn.split('/')[-2]]
         ctc_label = self.tokenizer.encode(item['transcription'])
         ret = {'audio': audio, 
                'audio_len': audio_len,
                'ctc_label': ctc_label,
-               'cls_label': cls_label,
+               'clf_label': clf_label,
                }
 
         return ret

@@ -1,1 +1,7 @@
+transformers=4.22.2
 evaluate
+jiwer
+evaluate
+pandas
+librosa
+jupyter

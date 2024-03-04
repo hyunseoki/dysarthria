@@ -69,7 +69,8 @@ def plot_F1score(data_loader, model, device, save_dir):
 
     for idx, sample in enumerate(tqdm.tqdm(data_loader)):
         sample = {k: v.to(device) for k, v in sample.items()}
-        _, logits = model(**sample)
+        ret = model(**sample)
+        logits = ret['clf_logits']
         batch_index = idx * batch_size
         results[batch_index:batch_index+batch_size] += logits.clone().detach().cpu().numpy()
 
